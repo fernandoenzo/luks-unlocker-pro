@@ -1,0 +1,43 @@
+#!/bin/sh
+
+# This script is used to unlock and mount LUKS devices at boot time
+# It uses the functions defined in /etc/initramfs-tools/scripts/luks-unlocker-pro
+# It requires the cryptsetup package to be installed and enabled in the initramfs
+
+PREREQ=""
+
+prereqs() {
+  echo "$PREREQ"
+}
+
+case "$1" in
+prereqs)
+  prereqs
+  exit 0
+  ;;
+esac
+
+. /scripts/luks-unlocker-pro
+
+# Unlock and mount the device holding the LUKS headers for the root partition.
+success_or_shell "exit" unlock_and_mount_device /dev/disk/by-uuid/1111-1111 "header"
+
+# Unlock and mount the device holding the keyfile for the root partition.
+success_or_shell "exit" unlock_and_mount_device /dev/disk/by-uuid/2222-2222 "keyfile"
+
+header_file="/mnt/header/header_file.luks"
+key_file="/mnt/keyfile/key_file.luks"
+
+# Use a LUKS header file and a key file to unlock the root partition without mounting it
+success_or_shell "exit" unlock_device /dev/disk/by-uuid/3333-3333 "root" 0 "$header_file" "$key_file"
+
+# Shred the passwords stored temporarily in a file
+shred_passwords
+
+# Close the devices that contains sensitive data used to unlock the root partition
+# and capture their return codes
+umount_and_close_device "header"; close_header=$?
+umount_and_close_device "keyfile"; close_keyfile=$?
+
+# If either of the last two commands fails, abort the program execution
+success_or_shell "exit" [ $((close_header | close_keyfile)) -eq 0 ]

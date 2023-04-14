@@ -1,0 +1,253 @@
+#!/bin/sh
+
+. /scripts/functions
+
+# Create a temporary file to store passwords
+passwords_file=$(mktemp)
+
+# Function: exec_silently(command)
+# Description: Execute a given command silently, suppressing both stdout and stderr.
+# Arguments:
+#   command: command and its arguments to execute
+exec_silently() {
+  "$@" >/dev/null 2>&1
+}
+
+# Function: print_text(text)
+# Description: Prints the given text using Plymouth if available, otherwise falls back to echo command.
+# Arguments:
+#   text: The text to be displayed
+print_text() {
+  { [ -x /bin/plymouth ] && plymouth --ping && plymouth display-message --text="$1"; } || echo -e "$1"
+}
+
+# Function: is_device_mounted(mount_point)
+# Description: Checks if a given mount point is already in use by a mounted device.
+# Arguments:
+#   mount_point: The mount point to check (e.g., /mnt/debian)
+# Return: 0 (true) if there is a device mounted at the specified mount point, 1 (false) otherwise
+is_device_mounted() {
+  mount_point=$1
+  grep -q -w "$mount_point" /proc/mounts && return 0 || return 1
+}
+
+# Function: unlock_device(device, mapper_name, max_attempts, header, keyfile)
+# Description: Unlocks a LUKS encrypted device using cryptsetup with provided options.
+# Arguments:
+#   device: The device to be unlocked (e.g., /dev/sda1)
+#   mapper_name: the name of the mapped device that will be created after unlocking the device (e.g., root)
+#   max_attempts (optional, default: 3): The maximum number of attempts for manual password input
+#   header (optional, default: none): The location of the LUKS header file, if detached from the device
+#   keyfile (optional, default: -): The path to the key file, use "-" for manual password input
+unlock_device() {
+  device=$1
+  mapper_name=$2
+  max_attempts=${3:-3}
+  header=${4:-none}
+  keyfile=${5:--}
+
+  # If the device is already unlocked, do nothing and return 0
+  [ -e "/dev/mapper/$mapper_name" ] && return 0
+
+  # Build the command to unlock the device with cryptsetup
+  cryptsetup_cmd="cryptsetup luksOpen $device $mapper_name --allow-discards --key-file $keyfile"
+  # If a header was provided, add it to the command
+  [ "$header" != "none" ] && cryptsetup_cmd="$cryptsetup_cmd --header $header"
+
+  # Try unlocking with current password and cryptsetup; print success if unlocked.
+  try_pass='exec_silently sh -c "echo -n $password | $cryptsetup_cmd" && print_text "$mapper_name set up successfully"'
+
+  # If no key file was provided or if it is "-", try to unlock the device with passwords stored in temporary file
+  if [ ! -e "$keyfile" ] || [ "$keyfile" = "-" ]; then
+    # We make sure the passwords file exists in case it was deleted before
+    touch $passwords_file
+    while read -r password; do
+      eval "$try_pass" && return 0
+    done <"$passwords_file"
+
+    # If unable to unlock device with stored passwords, prompt user to enter password up to max_attempts times specified by max_attempts
+    for i in $(seq 1 "$max_attempts"); do
+      password=$(/lib/cryptsetup/askpass "Enter password for device $mapper_name: ")
+      # If password is correct, print success message, store password in temporary file and return 0
+      eval "$try_pass" && echo "$password" >>"$passwords_file" && return 0
+      # If password is incorrect and there are still attempts left, print message indicating how many attempts are left.
+      { [ "$i" -lt "$max_attempts" ] && print_text "You have $((max_attempts - i)) attempts left. Please try again."; } ||
+        # If attempts are exhausted, print error message and return 1
+        { print_text "Failed to unlock $mapper_name device after $max_attempts attempts." && return 1; }
+    done
+  fi
+
+  # If a key file was provided, try to unlock device with it.
+  # If successful, print success message. Otherwise, print error message and return 1.
+  { $cryptsetup_cmd && print_text "$mapper_name set up successfully using keyfile"; } ||
+    { print_text "Failed to unlock $mapper_name using keyfile." && return 1; }
+}
+
+# Function: mount_device(device, is_mapped_device, folder_name)
+# Description: Mounts a device at a mount point under /mnt.
+# Arguments:
+#   device: The device to mount (e.g., /dev/sda1 or boot)
+#   is_mapped_device: A flag indicating if the device is a mapped device (e.g., true or false)
+#   folder_name (optional): The name of the folder under /mnt where the device will be mounted.
+#                           If not provided, the basename of the device will be used as the folder name.
+# Usage Examples:
+#   mount_device "mapped_device" true
+#   - This will mount /dev/mapper/mapped_device under /mnt/mapped_device
+#   mount_device "/dev/sda1" false debian
+#   - This will mount /dev/sda1 under /mnt/debian
+mount_device() {
+  device=$1
+  is_mapped_device=$2
+  folder_name=${3:-$(basename "$device")}
+
+  case "$is_mapped_device" in
+    true) device_path="/dev/mapper/$device" ;;
+    false) device_path="$device" ;;
+    *) print_text "Invalid value for is_mapped_device. Accepts only true or false" && return 1 ;;
+  esac
+
+  mount_point="/mnt/$folder_name"
+
+  is_device_mounted "$mount_point" && print_text "$folder_name already mounted" && return 0
+  fstype=$(get_fstype "$device_path") || { print_text "Unable to determine fstype for $folder_name" && return 1; }
+  mkdir -p "$mount_point" && mount -t "$fstype" "$device_path" "$mount_point" && print_text "$folder_name mounted successfully" || return 1
+}
+
+# Function: unlock_and_mount_device(device, mapper_name, max_attempts, header, keyfile)
+# Description: Unlocks a LUKS encrypted device and mounts it to a mount point under /mnt.
+# Arguments:
+#   device: The device to be unlocked and mounted (e.g., /dev/sda1)
+#   mapper_name: The name of the mapped device that will be created after unlocking the device (e.g., root)
+#   max_attempts (optional): The maximum number of attempts for unlocking the device with manual password input
+#   header (optional): The location of the LUKS header file, if detached from the device
+#   keyfile (optional): The path to the key file, use "-" for manual password input
+unlock_and_mount_device() {
+  device=$1
+  mapper_name=$2
+  max_attempts=$3
+  header=$4
+  keyfile=$5
+  unlock_device "$device" "$mapper_name" "$max_attempts" "$header" "$keyfile" && mount_device "$mapper_name" true
+}
+
+# Function: umount_and_close_device(mapper_name)
+# Description: Unmounts and closes a LUKS encrypted device.
+# Arguments:
+#   mapper_name: The name of the mapped device to close (e.g., root)
+# Usage Example:
+#   umount_and_close_device debian
+#   - This will unmount the LUKS device "/dev/mapper/debian" from "/mnt/debian" and close it using "cryptsetup luksClose debian".
+umount_and_close_device() {
+  mapper_name=$1
+  mount_point="/mnt/$mapper_name"
+
+  # If device is mounted, try unmounting it. If it fails, return exit code of umount command.
+  is_device_mounted "$mount_point" && ! umount "$mount_point" && return $?
+  # If device is unlocked, try closing it. If it fails, return exit code of cryptsetup command.
+  [ -e "/dev/mapper/$mapper_name" ] && ! cryptsetup luksClose "$mapper_name" && return $?
+  # If no errors occurred, print success message.
+  print_text "$mapper_name unmounted and closed successfully"
+}
+
+# Function: shred_passwords(iterations)
+# Description: Securely deletes the passwords_file using the shred command. Always returns 0 (success).
+# Arguments:
+#   iterations (optional, default: 10): The number of overwrite iterations to perform
+shred_passwords() {
+  iterations=${1:-10}
+  exec_silently shred -uzn "$iterations" "$passwords_file" || return 0
+}
+
+# Function: success_or_shell(action, command)
+# Description: This function is designed to execute a given shell command and check its
+# success. If the command fails, it provides an interactive shell for the user
+# to fix the error, with different behaviors depending on the chosen action:
+#
+# continue: Retry the failed command after fixing the error in the shell.
+#           The user can delete a temporary file to skip the failed command
+#           and continue with the rest of the script.
+#
+# exit:     Retry the failed command after fixing the error in the shell.
+#           The user can delete a temporary file to abort the entire script.
+#           Note that aborting the script won't stop the system from attempting
+#           to start.
+#
+# rerun:    Rerun the entire script after fixing the error in the shell.
+#           The user can delete a temporary file to abort the entire script.
+#           Note that aborting the script won't stop the system from attempting
+#           to start.
+#
+# Arguments:
+#   action:   "continue", "exit", or "rerun"
+#   command:  Any valid shell command
+success_or_shell() {
+  # Store the provided action and the current script's path
+  action=$1
+  this_script="$(readlink -f "$0")"
+
+  # Validate the action and show an error message if invalid
+  if [ "$action" != "continue" ] && [ "$action" != "exit" ] && [ "$action" != "rerun" ]; then
+    print_text "\nInvalid action. Allowed values: continue, exit, rerun." && success_or_shell rerun "$this_script"
+    exit 1
+  fi
+
+  # Shift the arguments to remove the action
+  shift
+
+  # Define the try_and_return and print_and_panic commands
+  try_and_return='"$@" && rm -f "$tmp_file" && return 0'
+  text="\nError during $this_script. Fix it in the interactive shell.\nType «exit» or press Ctrl-D when done to"
+  print_and_panic='print_text "$text" && panic'
+
+  # Execute the command and check for success
+  # If the command fails, create a temporary file and provide an interactive shell
+  # based on the chosen action
+  "$@" || {
+    tmp_file=$(mktemp)
+    shred_passwords
+    case "$action" in
+      "continue")
+        # Update the text message for the "continue" action
+        text="$text retry the failed function.\n\nDelete $tmp_file to skip it and continue."
+
+        # Loop while the temporary file exists
+        while [ -f "$tmp_file" ]; do
+          # Print the error message and enter the interactive shell
+          eval "$print_and_panic"
+          # If the temporary file has been deleted, the function stops its execution and returns 1.
+          # Otherwise, it attempts to re-execute the command and, if successful,
+          # removes the temporary file to break out of the loop
+          { [ ! -f "$tmp_file" ] && return 1; } || eval "$try_and_return"
+        done
+        ;;
+      "exit")
+        # Update the text message for the "exit" action
+        text="$text retry the failed function.\n\nDelete $tmp_file to abort the script.\n
+WARNING: Aborting the script won't stop the system from attempting to start."
+
+        # Loop while the temporary file exists
+        while [ -f "$tmp_file" ]; do
+          # Print the error message and enter the interactive shell
+          eval "$print_and_panic"
+          # If the temporary file has been deleted, the script is aborted with an exit 1.
+          # Otherwise, it attempts to re-execute the command and, if successful,
+          # removes the temporary file to break out of the loop
+          { [ ! -f "$tmp_file" ] && exit 1; } || eval "$try_and_return"
+        done
+        ;;
+      "rerun")
+        # Update the text message for the "rerun" action
+        text="$text rerun the entire script.\n\nDelete $tmp_file to avoid the rerun and abort the script.\n
+WARNING: Aborting the script won't stop the system from attempting to start."
+
+        # Print the error message and enter the interactive shell
+        eval "$print_and_panic"
+
+        # If the temporary file has been deleted, the script is aborted with an exit 1.
+        # Otherwise, it removes the temporary file and rerun the entire script
+        [ ! -f "$tmp_file" ] || { rm -rf "$tmp_file" && exec "$this_script"; }
+        exit 1
+        ;;
+    esac
+  }
+}
