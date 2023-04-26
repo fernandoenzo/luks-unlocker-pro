@@ -43,19 +43,17 @@ unlock_device() {
   device=$1
   mapper_name=$2
   max_attempts=${3:-3}
-  header=${4:-none}
-  keyfile=${5:--}
+  header=$4
+  keyfile=$5
 
   # If the device is already unlocked, do nothing and return 0
   [ -e "/dev/mapper/$mapper_name" ] && return 0
 
-  # Build the command to unlock the device with cryptsetup
-  cryptsetup_cmd="cryptsetup luksOpen $device $mapper_name --allow-discards --key-file $keyfile"
-  # If a header was provided, add it to the command
-  [ "$header" != "none" ] && cryptsetup_cmd="$cryptsetup_cmd --header $header"
+  # Build the command to unlock the device with cryptsetup, adding the --header and --key-file options if they are not empty.
+  cryptsetup_cmd="cryptsetup luksOpen $device $mapper_name --allow-discards ${header:+--header $header} ${keyfile:+--key-file $keyfile}"
 
   # Try unlocking with current password and cryptsetup; print success if unlocked.
-  try_pass='exec_silently sh -c "echo -n $password | $cryptsetup_cmd" && print_text "$mapper_name set up successfully"'
+  try_pass='exec_silently sh -c "echo $password | $cryptsetup_cmd" && print_text "$mapper_name set up successfully"'
 
   # If no key file was provided or if it is "-", try to unlock the device with passwords stored in temporary file
   if [ ! -e "$keyfile" ] || [ "$keyfile" = "-" ]; then
