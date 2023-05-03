@@ -27,7 +27,7 @@ print_text() {
 #   mount_point: The mount point to check (e.g., /mnt/debian)
 # Return: 0 (true) if there is a device mounted at the specified mount point, 1 (false) otherwise
 is_device_mounted() {
-  mount_point=$1
+  local mount_point=$1
   grep -q -w "$mount_point" /proc/mounts && return 0 || return 1
 }
 
@@ -40,25 +40,26 @@ is_device_mounted() {
 #   header (optional, default: none): The location of the LUKS header file, if detached from the device
 #   keyfile (optional, default: -): The path to the key file, use "-" for manual password input
 unlock_device() {
-  device=$1
-  mapper_name=$2
-  max_attempts=${3:-3}
-  header=$4
-  keyfile=$5
+  local device=$1
+  local mapper_name=$2
+  local max_attempts=${3:-3}
+  local header=$4
+  local keyfile=$5
 
   # If the device is already unlocked, do nothing and return 0
   [ -e "/dev/mapper/$mapper_name" ] && return 0
 
   # Build the command to unlock the device with cryptsetup, adding the --header and --key-file options if they are not empty.
-  cryptsetup_cmd="cryptsetup luksOpen $device $mapper_name --allow-discards ${header:+--header $header} ${keyfile:+--key-file $keyfile}"
+  local cryptsetup_cmd="cryptsetup luksOpen $device $mapper_name --allow-discards ${header:+--header $header} ${keyfile:+--key-file $keyfile}"
 
   # Try unlocking with current password and cryptsetup; print success if unlocked.
-  try_pass='exec_silently sh -c "echo $password | $cryptsetup_cmd" && print_text "$mapper_name set up successfully"'
+  local try_pass='exec_silently sh -c "echo $password | $cryptsetup_cmd" && print_text "$mapper_name set up successfully"'
 
   # If no key file was provided or if it is "-", try to unlock the device with passwords stored in temporary file
   if [ ! -e "$keyfile" ] || [ "$keyfile" = "-" ]; then
     # We make sure the passwords file exists in case it was deleted before
     touch $passwords_file
+    local password
     while read -r password; do
       eval "$try_pass" && return 0
     done <"$passwords_file"
@@ -94,9 +95,12 @@ unlock_device() {
 #   mount_device "/dev/sda1" false debian
 #   - This will mount /dev/sda1 under /mnt/debian
 mount_device() {
-  device=$1
-  is_mapped_device=$2
-  folder_name=${3:-$(basename "$device")}
+  local device=$1
+  local is_mapped_device=$2
+  local folder_name=${3:-$(basename "$device")}
+  local device_path
+  local mount_point
+  local fstype
 
   case "$is_mapped_device" in
     true) device_path="/dev/mapper/$device" ;;
@@ -120,11 +124,11 @@ mount_device() {
 #   header (optional): The location of the LUKS header file, if detached from the device
 #   keyfile (optional): The path to the key file, use "-" for manual password input
 unlock_and_mount_device() {
-  device=$1
-  mapper_name=$2
-  max_attempts=$3
-  header=$4
-  keyfile=$5
+  local device=$1
+  local mapper_name=$2
+  local max_attempts=$3
+  local header=$4
+  local keyfile=$5
   unlock_device "$device" "$mapper_name" "$max_attempts" "$header" "$keyfile" && mount_device "$mapper_name" true
 }
 
@@ -136,8 +140,8 @@ unlock_and_mount_device() {
 #   umount_and_close_device debian
 #   - This will unmount the LUKS device "/dev/mapper/debian" from "/mnt/debian" and close it using "cryptsetup luksClose debian".
 umount_and_close_device() {
-  mapper_name=$1
-  mount_point="/mnt/$mapper_name"
+  local mapper_name=$1
+  local mount_point="/mnt/$mapper_name"
 
   # If device is mounted, try unmounting it. If it fails, return exit code of umount command.
   is_device_mounted "$mount_point" && ! umount "$mount_point" && return $?
@@ -152,7 +156,7 @@ umount_and_close_device() {
 # Arguments:
 #   iterations (optional, default: 10): The number of overwrite iterations to perform
 shred_passwords() {
-  iterations=${1:-10}
+  local iterations=${1:-10}
   exec_silently shred -uzn "$iterations" "$passwords_file" || return 0
 }
 
@@ -180,8 +184,8 @@ shred_passwords() {
 #   command:  Any valid shell command
 success_or_shell() {
   # Store the provided action and the current script's path
-  action=$1
-  this_script="$(readlink -f "$0")"
+  local action=$1
+  local this_script="$(readlink -f "$0")"
 
   # Validate the action and show an error message if invalid
   if [ "$action" != "continue" ] && [ "$action" != "exit" ] && [ "$action" != "rerun" ]; then
@@ -193,15 +197,15 @@ success_or_shell() {
   shift
 
   # Define the try_and_return and print_and_panic commands
-  try_and_return='"$@" && rm -f "$tmp_file" && return 0'
-  text="\nError during $this_script. Fix it in the interactive shell.\nType «exit» or press Ctrl-D when done to"
-  print_and_panic='print_text "$text" && panic'
+  local try_and_return='"$@" && rm -f "$tmp_file" && return 0'
+  local text="\nError during $this_script. Fix it in the interactive shell.\nType «exit» or press Ctrl-D when done to"
+  local print_and_panic='print_text "$text" && panic'
 
   # Execute the command and check for success
   # If the command fails, create a temporary file and provide an interactive shell
   # based on the chosen action
   "$@" || {
-    tmp_file=$(mktemp)
+    local tmp_file=$(mktemp)
     shred_passwords
     case "$action" in
       "continue")
