@@ -2,6 +2,9 @@
 
 . /scripts/functions
 
+# In case we want to mount files as LUKS devices
+modprobe loop
+
 # Create a temporary file to store passwords
 passwords_file=$(mktemp)
 
