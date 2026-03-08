@@ -31,7 +31,9 @@ print_text() {
 # Return: 0 (true) if there is a device mounted at the specified mount point, 1 (false) otherwise
 is_device_mounted() {
   local mount_point=$1
-  grep -q -w "$mount_point" /proc/mounts && return 0 || return 1
+  # Match specifically the second field (mount point) in /proc/mounts to avoid
+  # false positives from partial matches in device paths or mount options
+  grep -q "^[^ ]* $mount_point " /proc/mounts
 }
 
 # Function: unlock_device(device, mapper_name, max_attempts, header, keyfile)
