@@ -161,7 +161,8 @@ umount_and_close_device() {
 #   iterations (optional, default: 10): The number of overwrite iterations to perform
 shred_passwords() {
   local iterations=${1:-10}
-  exec_silently shred -uzn "$iterations" "$passwords_file" || return 0
+  exec_silently shred -uzn "$iterations" "$passwords_file"
+  return 0
 }
 
 # Function: success_or_shell(action, command)
