@@ -61,7 +61,7 @@ unlock_device() {
   # If no key file was provided or if it is "-", try to unlock the device with passwords stored in temporary file
   if [ ! -e "$keyfile" ] || [ "$keyfile" = "-" ]; then
     # We make sure the passwords file exists in case it was deleted before
-    touch $passwords_file
+    touch "$passwords_file"
     local password
     local i
     while read -r password; do
