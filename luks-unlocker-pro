@@ -54,11 +54,8 @@ unlock_device() {
   # If the device is already unlocked, do nothing and return 0
   [ -e "/dev/mapper/$mapper_name" ] && return 0
 
-  # Build the command to unlock the device with cryptsetup, adding the --header and --key-file options if they are not empty.
-  local cryptsetup_cmd="cryptsetup luksOpen $device $mapper_name --allow-discards ${header:+--header $header} ${keyfile:+--key-file $keyfile}"
-
-  # Try unlocking with current password and cryptsetup; print success if unlocked.
-  local try_pass='exec_silently sh -c "echo $password | $cryptsetup_cmd" && print_text "$mapper_name set up successfully"'
+  # Build cryptsetup arguments, adding --header and --key-file options if provided
+  local cryptsetup_args="luksOpen $device $mapper_name --allow-discards ${header:+--header $header} ${keyfile:+--key-file $keyfile}"
 
   # If no key file was provided or if it is "-", try to unlock the device with passwords stored in temporary file
   if [ ! -e "$keyfile" ] || [ "$keyfile" = "-" ]; then
@@ -67,25 +64,40 @@ unlock_device() {
     local password
     local i
     while read -r password; do
-      eval "$try_pass" && return 0
+      # Use printf to safely pass password without shell interpretation of special characters
+      if printf '%s' "$password" | exec_silently cryptsetup $cryptsetup_args; then
+        print_text "$mapper_name set up successfully"
+        return 0
+      fi
     done <"$passwords_file"
 
-    # If unable to unlock device with stored passwords, prompt user to enter password up to max_attempts times specified by max_attempts
+    # If unable to unlock device with stored passwords, prompt user to enter password up to max_attempts times
     for i in $(seq 1 "$max_attempts"); do
       password=$(/lib/cryptsetup/askpass "Enter password for device $mapper_name: ")
       # If password is correct, print success message, store password in temporary file and return 0
-      eval "$try_pass" && echo "$password" >>"$passwords_file" && return 0
+      if printf '%s' "$password" | exec_silently cryptsetup $cryptsetup_args; then
+        print_text "$mapper_name set up successfully"
+        printf '%s\n' "$password" >>"$passwords_file"
+        return 0
+      fi
       # If password is incorrect and there are still attempts left, print message indicating how many attempts are left.
-      { [ "$i" -lt "$max_attempts" ] && print_text "You have $((max_attempts - i)) attempts left. Please try again."; } ||
-        # If attempts are exhausted, print error message and return 1
-        { print_text "Failed to unlock $mapper_name device after $max_attempts attempts." && return 1; }
+      if [ "$i" -lt "$max_attempts" ]; then
+        print_text "You have $((max_attempts - i)) attempts left. Please try again."
+      else
+        print_text "Failed to unlock $mapper_name device after $max_attempts attempts."
+        return 1
+      fi
     done
   fi
 
   # If a key file was provided, try to unlock device with it.
   # If successful, print success message. Otherwise, print error message and return 1.
-  { $cryptsetup_cmd && print_text "$mapper_name set up successfully using keyfile"; } ||
-    { print_text "Failed to unlock $mapper_name using keyfile." && return 1; }
+  if cryptsetup $cryptsetup_args; then
+    print_text "$mapper_name set up successfully using keyfile"
+  else
+    print_text "Failed to unlock $mapper_name using keyfile."
+    return 1
+  fi
 }
 
 # Function: mount_device(device, is_mapped_device, folder_name)
