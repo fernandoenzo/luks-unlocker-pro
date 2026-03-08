@@ -62,6 +62,7 @@ and initramfs-tools built-in functions (`/scripts/functions`).
   `[[ ]]`, `(( ))`, `declare`, `typeset`, process substitution (`<()`), or `here-strings`.
 - Use `$()` for command substitution. Never use backticks.
 - Use `[ ]` (single bracket) for test expressions, not `[[ ]]`.
+- Use `printf` for all output operations.
 
 ### Indentation and Formatting
 
@@ -123,9 +124,19 @@ is not immediately obvious (see `mount_device` and `umount_and_close_device`).
 
 ### Error Handling
 
-- Use `&&` / `||` chaining for control flow. This is the dominant pattern:
+- Use `&&` / `||` chaining for simple control flow:
   ```sh
   command && print_text "success" || { print_text "failure" && return 1; }
+  ```
+- For multi-step error handling, prefer `if`/`then`/`else` to avoid precedence
+  ambiguity:
+  ```sh
+  if command; then
+    print_text "success"
+  else
+    print_text "failure"
+    return 1
+  fi
   ```
 - Return `0` for success, `1` (or non-zero) for failure.
 - Use `return` in functions, `exit` only in top-level scripts or for fatal errors.
@@ -150,8 +161,9 @@ is not immediately obvious (see `mount_device` and `umount_and_close_device`).
     *) fallback ;;
   esac
   ```
-- `if` statements are acceptable but the codebase prefers `&&`/`||` chaining for
-  simple conditionals.
+- `if`/`then`/`else` statements are preferred for multi-step logic or when
+  `&&`/`||` chaining would create ambiguous precedence. Simple one-line
+  conditionals may still use `&&`/`||` chaining.
 - Use `for i in $(seq 1 "$n")` for numeric loops (POSIX-compatible).
 
 ### Imports / Sourcing
@@ -163,17 +175,9 @@ is not immediately obvious (see `mount_device` and `umount_and_close_device`).
 ### Output and User Interaction
 
 - Use `print_text` for all user-facing messages. This function handles Plymouth
-  (graphical boot) and falls back to `echo`.
+  (graphical boot) and falls back to `printf`.
 - Use `exec_silently` to suppress stdout/stderr from commands that should run quietly.
 - Use `/lib/cryptsetup/askpass` for password prompts (Debian initramfs convention).
-
-## Key API Notes
-
-- `mount_device(device, is_mapped_device, folder_name)` takes a boolean string
-  (`"true"` or `"false"`) as its second argument to indicate whether the device
-  is a device-mapper name or an absolute path.
-- `unlock_device` uses `eval` with deferred variable expansion for the password
-  piping and cryptsetup command construction. Be careful when modifying this logic.
 
 ## Runtime Dependencies
 
