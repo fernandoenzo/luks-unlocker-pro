@@ -17,11 +17,11 @@ exec_silently() {
 }
 
 # Function: print_text(text)
-# Description: Prints the given text using Plymouth if available, otherwise falls back to echo command.
+# Description: Prints the given text using Plymouth if available, otherwise falls back to printf.
 # Arguments:
 #   text: The text to be displayed
 print_text() {
-  { [ -x /bin/plymouth ] && plymouth --ping && plymouth display-message --text="$1"; } || echo -e "$1"
+  { [ -x /bin/plymouth ] && plymouth --ping && plymouth display-message --text="$1"; } || printf '%b\n' "$1"
 }
 
 # Function: is_device_mounted(mount_point)
