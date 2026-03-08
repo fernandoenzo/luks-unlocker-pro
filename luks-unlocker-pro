@@ -151,10 +151,14 @@ umount_and_close_device() {
   local mapper_name=$1
   local mount_point="/mnt/$mapper_name"
 
-  # If device is mounted, try unmounting it. If it fails, return exit code of umount command.
-  is_device_mounted "$mount_point" && ! umount "$mount_point" && return $?
-  # If device is unlocked, try closing it. If it fails, return exit code of cryptsetup command.
-  [ -e "/dev/mapper/$mapper_name" ] && ! cryptsetup luksClose "$mapper_name" && return $?
+  # If device is mounted, try unmounting it. If it fails, return the exit code of umount.
+  if is_device_mounted "$mount_point"; then
+    umount "$mount_point" || return $?
+  fi
+  # If device is unlocked, try closing it. If it fails, return the exit code of cryptsetup.
+  if [ -e "/dev/mapper/$mapper_name" ]; then
+    cryptsetup luksClose "$mapper_name" || return $?
+  fi
   # If no errors occurred, print success message.
   print_text "$mapper_name unmounted and closed successfully"
 }
