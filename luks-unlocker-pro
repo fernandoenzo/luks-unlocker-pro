@@ -63,6 +63,7 @@ unlock_device() {
     # We make sure the passwords file exists in case it was deleted before
     touch $passwords_file
     local password
+    local i
     while read -r password; do
       eval "$try_pass" && return 0
     done <"$passwords_file"
