@@ -118,7 +118,9 @@ mount_device() {
 
   is_device_mounted "$mount_point" && print_text "$folder_name already mounted" && return 0
   fstype=$(get_fstype "$device_path") || { print_text "Unable to determine fstype for $folder_name" && return 1; }
-  mkdir -p "$mount_point" && mount -t "$fstype" "$device_path" "$mount_point" && print_text "$folder_name mounted successfully" || return 1
+  { mkdir -p "$mount_point" && mount -t "$fstype" "$device_path" "$mount_point"; } ||
+    { print_text "Failed to mount $folder_name" && return 1; }
+  print_text "$folder_name mounted successfully"
 }
 
 # Function: unlock_and_mount_device(device, mapper_name, max_attempts, header, keyfile)
