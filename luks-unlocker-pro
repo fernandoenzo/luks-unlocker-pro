@@ -251,7 +251,7 @@ WARNING: Aborting the script won't stop the system from attempting to start."
 
         # If the temporary file has been deleted, the script is aborted with an exit 1.
         # Otherwise, it removes the temporary file and rerun the entire script
-        [ ! -f "$tmp_file" ] || { rm -rf "$tmp_file" && exec "$this_script"; }
+        [ ! -f "$tmp_file" ] || { rm -f "$tmp_file" && exec "$this_script"; }
         exit 1
         ;;
     esac
