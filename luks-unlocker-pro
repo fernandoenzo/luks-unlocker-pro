@@ -100,30 +100,31 @@ unlock_device() {
   fi
 }
 
-# Function: mount_device(device, is_mapped_device, folder_name)
-# Description: Mounts a device at a mount point under /mnt.
+# Function: mount_device(device, folder_name)
+# Description: Mounts a device at a mount point under /mnt. If the device is given as an
+#   absolute path (starting with /), it is used directly. Otherwise, it is treated as a
+#   device-mapper name and resolved to /dev/mapper/<device>.
 # Arguments:
-#   device: The device to mount (e.g., /dev/sda1 or boot)
-#   is_mapped_device: A flag indicating if the device is a mapped device (e.g., true or false)
+#   device: The device to mount. Can be an absolute path (e.g., /dev/sda1) or a
+#           device-mapper name (e.g., root, which resolves to /dev/mapper/root)
 #   folder_name (optional): The name of the folder under /mnt where the device will be mounted.
 #                           If not provided, the basename of the device will be used as the folder name.
 # Usage Examples:
-#   mount_device "mapped_device" true
-#   - This will mount /dev/mapper/mapped_device under /mnt/mapped_device
-#   mount_device "/dev/sda1" false debian
+#   mount_device "root"
+#   - This will mount /dev/mapper/root under /mnt/root
+#   mount_device "/dev/sda1" debian
 #   - This will mount /dev/sda1 under /mnt/debian
 mount_device() {
   local device=$1
-  local is_mapped_device=$2
-  local folder_name=${3:-$(basename "$device")}
+  local folder_name=${2:-$(basename "$device")}
   local device_path
   local mount_point
   local fstype
 
-  case "$is_mapped_device" in
-    true) device_path="/dev/mapper/$device" ;;
-    false) device_path="$device" ;;
-    *) print_text "Invalid value for is_mapped_device. Accepts only true or false" && return 1 ;;
+  # If device starts with /, treat it as an absolute path; otherwise as a mapper name
+  case "$device" in
+    /*) device_path="$device" ;;
+    *)  device_path="/dev/mapper/$device" ;;
   esac
 
   mount_point="/mnt/$folder_name"
@@ -149,7 +150,7 @@ unlock_and_mount_device() {
   local max_attempts=$3
   local header=$4
   local keyfile=$5
-  unlock_device "$device" "$mapper_name" "$max_attempts" "$header" "$keyfile" && mount_device "$mapper_name" true
+  unlock_device "$device" "$mapper_name" "$max_attempts" "$header" "$keyfile" && mount_device "$mapper_name"
 }
 
 # Function: umount_and_close_device(mapper_name)
