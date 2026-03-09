@@ -60,7 +60,7 @@ When no key file is provided (or when it is set to `"-"`), the function first tr
 | `device` | Yes | | Device path (e.g., `/dev/sda1` or `/dev/disk/by-uuid/...`) |
 | `mapper_name` | Yes | | Name for the mapped device (e.g., `root`) |
 | `max_attempts` | No | `3` | Maximum password attempts. Set to `0` to skip interactive prompt |
-| `header` | No | | Path to a detached LUKS header file |
+| `header` | No | | Path to a detached LUKS header file. Pass `""` to skip while providing a keyfile |
 | `keyfile` | No | | Path to a key file. Use `"-"` for interactive password input |
 
 ### `mount_device(device, folder_name)`
