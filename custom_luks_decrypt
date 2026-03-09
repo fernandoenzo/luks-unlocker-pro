@@ -19,7 +19,7 @@ esac
 
 . /scripts/luks-unlocker-pro
 
-# Unlock and mount the device holding the LUKS headers for the root partition.
+# Unlock and mount the device holding the LUKS header for the root partition.
 success_or_shell "exit" unlock_and_mount_device /dev/disk/by-uuid/1111-1111 "header"
 
 # Unlock and mount the device holding the keyfile for the root partition.
@@ -34,8 +34,7 @@ success_or_shell "exit" unlock_device /dev/disk/by-uuid/3333-3333 "root" 0 "$hea
 # Shred the passwords stored temporarily in a file
 shred_passwords
 
-# Close the devices that contains sensitive data used to unlock the root partition
-# and capture their return codes
+# Close the devices that contain sensitive data used to unlock the root partition and capture their return codes
 umount_and_close_device "header"; close_header=$?
 umount_and_close_device "keyfile"; close_keyfile=$?
 

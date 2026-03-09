@@ -152,6 +152,35 @@ success_or_shell "exit" unlock_and_mount_device /dev/disk/by-uuid/YOUR-UUID "roo
 shred_passwords
 ```
 
+## Automating Password Input
+
+> **Security Warning:** This approach stores passwords in plain text within your boot script. The password will be visible in:
+> - The script file itself (`/etc/initramfs-tools/scripts/local-top/custom_luks_decrypt`)
+> - The initramfs image (which can be extracted and inspected)
+>
+> Only use this if you fully understand and accept these risks. For production environments, consider using a proper key file instead.
+
+When loading the library, a temporary file is created and its path is stored in the `$passwords_file` variable. You can pre-populate this file with passwords to enable automated unlocking without interactive prompts:
+
+```sh
+#!/bin/sh
+
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "$1" in prereqs) prereqs; exit 0 ;; esac
+
+. /scripts/luks-unlocker-pro
+
+# Pre-populate the password (insecure - password is visible in the script)
+printf '%s\n' 'your-password-here' >> "$passwords_file"
+
+# The unlock will now use the pre-populated password automatically
+success_or_shell "exit" unlock_and_mount_device /dev/disk/by-uuid/XXX "root"
+shred_passwords
+```
+
+This technique is useful for automated testing or specific use cases, but consider using a proper key file (`keyfile` parameter) for production environments.
+
 ## Contributing
 
 Pull requests are welcome. For major changes, please open an issue first to discuss what you would like to change.
