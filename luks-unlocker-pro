@@ -36,6 +36,19 @@ is_device_mounted() {
   grep -q "^[^ ]* $mount_point " /proc/mounts
 }
 
+# Helper function to unlock a device with a password
+unlock_with_password() {
+  local device=$1
+  local mapper_name=$2
+  local password=$3
+  local header=$4
+
+  local cryptsetup_args="luksOpen $device $mapper_name --allow-discards ${header:+--header $header}"
+  if printf '%s' "$password" | exec_silently cryptsetup $cryptsetup_args; then
+    print_text "$mapper_name set up successfully"
+  fi
+}
+
 # Function: unlock_device(device, mapper_name, max_attempts, header, keyfile)
 # Description: Unlocks a LUKS encrypted device using cryptsetup with provided options.
 # Arguments:
@@ -64,9 +77,7 @@ unlock_device() {
     local password
     local i
     while read -r password; do
-      # Use printf to safely pass password without shell interpretation of special characters
-      if printf '%s' "$password" | exec_silently cryptsetup $cryptsetup_args; then
-        print_text "$mapper_name set up successfully"
+      if unlock_with_password "$device" "$mapper_name" "$password" "$header"; then
         return 0
       fi
     done <"$passwords_file"
@@ -74,9 +85,7 @@ unlock_device() {
     # If unable to unlock device with stored passwords, prompt user to enter password up to max_attempts times
     for i in $(seq 1 "$max_attempts"); do
       password=$(/lib/cryptsetup/askpass "Enter password for device $mapper_name: ")
-      # If password is correct, print success message, store password in temporary file and return 0
-      if printf '%s' "$password" | exec_silently cryptsetup $cryptsetup_args; then
-        print_text "$mapper_name set up successfully"
+      if unlock_with_password "$device" "$mapper_name" "$password" "$header"; then
         printf '%s\n' "$password" >>"$passwords_file"
         return 0
       fi
@@ -233,46 +242,31 @@ success_or_shell() {
   "$@" || {
     local tmp_file=$(mktemp)
     shred_passwords
+
+    local on_error
     case "$action" in
       "continue")
-        # Update the text message for the "continue" action
         text="$text retry the failed function.\n\nDelete $tmp_file to skip it and continue."
-
-        # Loop while the temporary file exists
-        while [ -f "$tmp_file" ]; do
-          # Print the error message and enter the interactive shell
-          eval "$print_and_panic"
-          # If the temporary file has been deleted, the function stops its execution and returns 1.
-          # Otherwise, it attempts to re-execute the command and, if successful,
-          # removes the temporary file to break out of the loop
-          { [ ! -f "$tmp_file" ] && return 1; } || eval "$try_and_return"
-        done
+        on_error="return 1"
         ;;
       "exit")
-        # Update the text message for the "exit" action
-        text="$text retry the failed function.\n\nDelete $tmp_file to abort the script.\n
-WARNING: Aborting the script won't stop the system from attempting to start."
+        text="$text retry the failed function.\n\nDelete $tmp_file to abort the script.\n\nWARNING: Aborting the script won't stop the system from attempting to start."
+        on_error="exit 1"
+        ;;
+      "rerun")
+        text="$text rerun the entire script.\n\nDelete $tmp_file to avoid the rerun and abort the script.\n\nWARNING: Aborting the script won't stop the system from attempting to start."
+        ;;
+    esac
 
-        # Loop while the temporary file exists
+    case "$action" in
+      "continue"|"exit")
         while [ -f "$tmp_file" ]; do
-          # Print the error message and enter the interactive shell
           eval "$print_and_panic"
-          # If the temporary file has been deleted, the script is aborted with an exit 1.
-          # Otherwise, it attempts to re-execute the command and, if successful,
-          # removes the temporary file to break out of the loop
-          { [ ! -f "$tmp_file" ] && exit 1; } || eval "$try_and_return"
+          { [ ! -f "$tmp_file" ] && eval "$on_error"; } || eval "$try_and_return"
         done
         ;;
       "rerun")
-        # Update the text message for the "rerun" action
-        text="$text rerun the entire script.\n\nDelete $tmp_file to avoid the rerun and abort the script.\n
-WARNING: Aborting the script won't stop the system from attempting to start."
-
-        # Print the error message and enter the interactive shell
         eval "$print_and_panic"
-
-        # If the temporary file has been deleted, the script is aborted with an exit 1.
-        # Otherwise, it removes the temporary file and rerun the entire script
         [ ! -f "$tmp_file" ] || { rm -f "$tmp_file" && exec "$this_script"; }
         exit 1
         ;;
